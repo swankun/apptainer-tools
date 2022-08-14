@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+source /opt/apptainer/bin/common.bash
+sif_path="/opt/apptainer/images/ros/noetic.sif"
+
+function execute() {
+  cmd_source_ros='source /opt/ros/$ROS_DISTRO/setup.bash'
+  cmd_exec=${@:2}
+  cmd_full="${cmd_source_ros}"
+  if [[ -e devel/setup.bash && $USER != "root" ]]; then
+    cmd_source_ws='source devel/setup.bash'
+    cmd_full+=" && ${cmd_source_ws}"
+  fi
+  if [[ -e install/setup.bash && $USER != "root" ]]; then
+    cmd_source_ws='source install/setup.bash'
+    cmd_full+=" && ${cmd_source_ws}"
+  fi
+  cmd_full+=" && $cmd_exec"
+  run_exec $1 $cmd_full
+}
+
+if [[ $1 == "-e" ]]; then
+  execute $sif_path ${@:2}
+else
+  run_shell $sif_path
+fi

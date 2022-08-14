@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-APPTAINER_BIN="apptainer -q"
+export NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video,display
+APPTAINER_BIN='apptainer -q'
 
 function make_cache() {
   image_path=$1

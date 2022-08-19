@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 
 source /opt/apptainer/bin/common.bash
+if [[ $? != 0 ]]; then
+  echo "Apptainer/Singularity not installed"
+  exit 1
+fi
 sif_path="/opt/apptainer/images/ros/noetic.sif"
 
-function execute() {
+function prepend_exec_cmd() {
   cmd_source_ros='source /opt/ros/$ROS_DISTRO/setup.bash'
-  cmd_exec=${@:2}
-  cmd_full="${cmd_source_ros}"
+  cmd_exec=${@:1}
+  cmd_full=$cmd_source_ros
   if [[ -e devel/setup.bash && $USER != "root" ]]; then
     cmd_source_ws='source devel/setup.bash'
     cmd_full+=" && ${cmd_source_ws}"
@@ -16,11 +20,11 @@ function execute() {
     cmd_full+=" && ${cmd_source_ws}"
   fi
   cmd_full+=" && $cmd_exec"
-  run_exec $1 $cmd_full
+  echo $cmd_full
 }
 
 if [[ $1 == "-e" ]]; then
-  execute $sif_path ${@:2}
+  run_exec $sif_path $(prepend_exec_cmd ${@:2})
 else
-  run_shell $sif_path
+  run_run $sif_path
 fi

@@ -1,14 +1,33 @@
 #!/usr/bin/env bash
 
-export NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video,display
-APPTAINER_BIN='apptainer -q'
+APPTAINER=""
+if [[ $(command -v apptainer) ]]; then
+  APPTAINER='apptainer'
+elif [[ $(command -v singularity) ]]; then
+  APPTAINER='singularity'
+else
+  return 1
+fi
+APPTAINER_OPT='-q'
+APPTAINER_BIN="$APPTAINER $APPTAINER_OPT"
+
+NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video,display
+MAIN_USER=$(who am i | awk '{print $1}')
+
+
+function replacewith() {
+  newpattern=$1
+  oldpattern=$2
+  input=$3
+  echo `sed "s!$oldpattern!$newpattern!g"<<<"$input"`
+}
 
 function make_cache() {
   image_path=$1
-  tmp_dir="/home/wankun/.apptainer/run/cache/$(basename $image_path)"
+  tmp_dir="/home/$MAIN_USER/.$APPTAINER/run/cache/$(basename $image_path)"
   dirs="$tmp_dir $tmp_dir/root $tmp_dir/home"
   if [[ $USER == "root" ]]; then
-    runuser -l wankun -c "mkdir -p $dirs > /dev/null 2>&1"
+    runuser -l $MAIN_USER -c "mkdir -p $dirs > /dev/null 2>&1"
   else
     mkdir -p $dirs > /dev/null 2>&1
   fi
@@ -16,30 +35,34 @@ function make_cache() {
 }
 
 function bind_pwd() {
-  cache=$1
-  myhome=`echo $PWD | grep -o '/home/[^/]*'` # user's $HOME
-  if [[ $PWD == $myhome ]]
+  echo $(bind $PWD)
+}
+
+function bind() {
+  src=$1
+  myhome=`echo $src | grep -o '/home/[^/]*'` # user's $HOME
+  if [[ $src == $myhome ]]
   then  # don't mount home directory (use cache)
     mnt=""
     target=""
-  elif [[ ! -z `echo $PWD | grep -o '/home/[^/]*/[^/]*'` ]]
-  then # mount $PWD and parents until just below $HOME
-    mnt=`echo $PWD | grep -o '/home/[^/]*/[^/]*'`
+  elif [[ ! -z `echo $src | grep -o '/home/[^/]*/[^/]*'` ]]
+  then # mount $src and parents until just below $HOME
+    mnt=`echo $src | grep -o '/home/[^/]*/[^/]*'`
     target=$mnt
   else # fall back to mount only $PWD
-    mnt="$PWD"
+    mnt=$src
     target=$mnt
   fi
   # If you're root, change $HOME in target to /root
   if [[ $USER == "root" ]]; then
-    target=`sed "s!$myhome!$HOME!g"<<<"$mnt"`
+    target=$(replacewith "/root" $myhome $mnt)
   fi
   opt=" --bind $mnt:$target"
   echo $opt
 }
 
 function bind_home() {
-  cache=$1
+  cache=$(make_cache $image_path)
   myhome=`echo $PWD | grep -o '/home/[^/]*'` # user's $HOME
   opt=""
   if [[ $USER == "root" ]]; then
@@ -55,8 +78,12 @@ function bind_home() {
 function default_options() {
   opts=""
   opts+=" --pid"
-  opts+=" --nv"
-  opts+=" --nvccli"
+  if [[ $(command -v nvidia-smi) ]]; then
+    opts+=" --nv"
+  fi
+  if [[ $(command -v nvidia-container-toolkit) ]]; then
+    opts+=" --nvccli"
+  fi
   if [[ $USER == "root" ]]; then
     opts+=" --writable"
   else
@@ -65,25 +92,31 @@ function default_options() {
   echo $opts
 }
 
+function run_run() {
+  image_path=$1
+  $APPTAINER_BIN run \
+    $(default_options) \
+    $(bind_home) \
+    $(bind_pwd) \
+    $image_path
+}
+
 function run_shell() {
   image_path=$1
-  cache=$(make_cache $image_path)
   $APPTAINER_BIN shell \
     $(default_options) \
-    $(bind_home $cache) \
-    $(bind_pwd $cache) \
+    $(bind_home) \
+    $(bind_pwd) \
     $image_path
 }
 
 function run_exec() {
   image_path=$1
-  cache=$(make_cache $image_path)
   cmd_exec=${@:2}
-  # echo "Executing \"$cmd_exec\" in $(basename $image_path)"
   $APPTAINER_BIN exec \
     $(default_options) \
-    $(bind_home $cache) \
-    $(bind_pwd $cache) \
+    $(bind_home) \
+    $(bind_pwd) \
     $image_path \
     /bin/bash -c "$cmd_exec"
 }

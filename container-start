@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+function _make_runtime_cache()
+{
+    mkdir -p "/mnt/data/apptainer/runtime/${instance_name}/home"
+    apptainer overlay create \
+        --sparse \
+        --fakeroot \
+        --size 1024 \
+        "/mnt/data/apptainer/runtime/${instance_name}/overlay.img" >/dev/null 2>&1
+    if (( "$?" != 0 && "$?" != 255 )); then
+        echo "Unexpected error while creating overlay image for ${instance_name}!"
+        return 1
+    fi
+}
+
+function apptainer_start()
+{
+    local image_path=$1; shift 1
+    local instance_name=$1; shift 1
+    _make_runtime_cache || return 1
+    runopts=(
+        --nv
+        --writable-tmpfs
+        --no-mount "home,cwd"
+        --bind "/mnt/data/apptainer/runtime/${instance_name}/home:/home/${USER}"
+        --bind "/mnt/data/projects:/home/${USER}/Apptainer"
+        --overlay "/mnt/data/apptainer/runtime/${instance_name}/overlay.img:ro"
+    )
+    apptainer instance start "${runopts[@]}" "$@" "${image_path}" "${instance_name}"
+}
+
+function apptainer_attach()
+{
+    local instance_name=$1; shift
+    runopts=(
+        --env "DISPLAY=:$($HOME/.local/bin/x11-display-number)"
+    )
+    apptainer exec "${runopts[@]}" "instance://${instance_name}" bash -l
+}
+
+function apptainer_start_fakeroot()
+{
+    local image_path=$1; shift 1
+    local instance_name=$1; shift 1
+    _make_runtime_cache || return 1
+    runopts=(
+        --no-mount "home,cwd"
+        --fakeroot
+        --bind "/mnt/data/projects:/root/Apptainer"
+        --env "DISPLAY=:$($HOME/.local/bin/x11-display-number)"
+        --overlay "/mnt/data/apptainer/runtime/${instance_name}/overlay.img:rw"
+    )
+    apptainer exec "${runopts[@]}" "$@" "${image_path}" bash -l
+}
+
+function main()
+{
+    declare -A image_path_map
+    image_path_map[noetic]="/mnt/data/apptainer/images/prism/develop_0.2.2.sif"
+    image_path_map[roscon]="/mnt/data/apptainer/images/ros/rolling.sif"
+    image_path_map[humble]="/mnt/data/apptainer/images/ros/humble.sif"
+    image_path_map[galactic]="/mnt/data/apptainer/images/ros/galactic.sif"
+
+    declare use_fakeroot
+    if [ "$1" == "--fakeroot" ]
+    then
+        use_fakeroot=1
+        shift 1
+    fi
+    
+    target=$1; shift 1
+    if [ -z "${image_path_map[$target]+_exists}" ]
+    then
+        echo "Image path mapping for container ${target} does not exist! Exiting.."
+        exit 1
+    fi
+
+    local instance_name="${target}"
+    local image_path="${image_path_map[${target}]}"
+    if [ "$use_fakeroot" ]
+    then
+        echo "Starting standalone fakeroot instance"
+        apptainer_start_fakeroot \
+            "${image_path}" \
+            "${instance_name}" \
+            "$@"
+        exit
+    fi
+    
+    declare instance_exists 
+    apptainer instance list | grep "${instance_name}" >/dev/null 2>&1
+    instance_exists=$?
+    if (( "$instance_exists" == 0 ))
+    then
+        echo "Attaching to existing ${instance_name} apptainer instance"
+    else
+        echo "Starting ${instance_name} apptainer instance from ${image_path}"
+        apptainer_start \
+            "${image_path}" \
+            "${instance_name}" \
+            "$@"
+    fi
+    apptainer_attach "${instance_name}"
+}
+
+main "$@"
